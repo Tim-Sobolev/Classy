@@ -134,7 +134,7 @@ class ClassyPlugin(idaapi.plugin_t):
     def edit_pure_virtual_vals(self):
         db = database.get()
 
-        txt = idaapi.ask_str(', '.join([('0x%X' % x) for x in db.pure_virtual_vals]), idaapi.HIST_IDENT,"Enter pure virtual values")
+        txt = idaapi.ask_str(', '.join([('0x%X' % x) for x in db.pure_virtual_vals]), 0, "Enter pure virtual values")
         if txt is None or not txt.strip():
             return
 
@@ -153,7 +153,7 @@ class ClassyPlugin(idaapi.plugin_t):
     def edit_deleted_virtual_vals(self):
         db = database.get()
 
-        txt = idaapi.ask_str(', '.join([('0x%X' % x) for x in db.deleted_virtual_vals]), idaapi.HIST_IDENT,"Enter deleted virtual values")
+        txt = idaapi.ask_str(', '.join([('0x%X' % x) for x in db.deleted_virtual_vals]), 0, "Enter deleted virtual values")
         if txt is None or not txt.strip():
             return
 
