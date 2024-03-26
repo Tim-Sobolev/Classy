@@ -336,7 +336,7 @@ class ClassWidget(QtWidgets.QWidget):
             # This way of doing won't work when allowing sorting
             self.methods.setRowCount(len(self.edit_class.methods))
             for idx, m in enumerate(self.edit_class.methods):
-                address_item = QtWidgets.QTableWidgetItem(m.ea)
+                address_item = QtWidgets.QTableWidgetItem(str(idx))
                 address_item.setData(QtCore.Qt.DisplayRole, "0x%X" % m.ea)
                 address_item.setData(QtCore.Qt.UserRole, m)
                 self.methods.setItem(idx, 0, address_item)
@@ -536,4 +536,3 @@ class ClassWidget(QtWidgets.QWidget):
             m.set_signature(dlg.name, dlg.args, dlg.return_type, dlg.is_const, dlg.ctor_type, dlg.dtor_type)
             self.methods.setItem(row, 1, QtWidgets.QTableWidgetItem(m.get_signature()))
             idaapi.refresh_idaview_anyway()
-
