@@ -1,9 +1,13 @@
 import idaapi
 import idc
 import ida_bytes
+import ida_typeinf
 
 import classy.database as database
 import classy.itanium_mangler as itanium_mangler
+
+void_pointer_type = ida_typeinf.tinfo_t(ida_typeinf.BT_VOID)
+void_data_type = ida_typeinf.tinfo_t(ida_typeinf.BT_VOID)
 
 
 class Class(object):
@@ -30,6 +34,34 @@ class Class(object):
         db.classes_by_name[name] = self
         if self.base is None:
             db.root_classes.append(self)
+
+
+    @staticmethod
+    def get_ptr_value(ea, pointer_size):
+        return {
+            1: ida_bytes.get_wide_byte,
+            2: ida_bytes.get_wide_word,
+            4: ida_bytes.get_wide_dword,
+            8: ida_bytes.get_qword
+        }.get(pointer_size, ida_bytes.get_wide_byte)(ea)
+
+
+    @staticmethod
+    def make_ptr(ea, pointer_size):
+        data_size = pointer_size
+        data_type = ida_bytes.get_flags_by_size(data_size)
+        if data_type == 0:
+            data_size = 1
+            data_type = ida_bytes.FF_BYTE
+        ida_bytes.create_data(ea, data_type, data_size, idaapi.BADADDR)
+        idc.op_plain_offset(ea, 0, 0)
+
+
+    @property
+    def pointer_size(self):
+        if not void_pointer_type.is_ptr():
+            void_pointer_type.create_ptr(void_data_type)
+        return void_pointer_type.get_size()
 
 
     def unlink(self, delete_orphaned_struct=False):
@@ -104,12 +136,13 @@ class Class(object):
     def set_vtable_range(self, start, end):
         if self.is_vtable_locked():
             raise ValueError('VTable cannot be modified because the class has derived classes')
-        if start % 4 or end % 4:
-            raise ValueError('VTable start and end must be 4 byte aligned')
+        pointer_size = self.pointer_size
+        if start % pointer_size or end % pointer_size:
+            raise ValueError('VTable start and end must be %d byte aligned' % pointer_size)
         if start >= end:
             raise ValueError('Vtable end must be after the start')
         if self.base:
-            new_len = (end - start) // 4
+            new_len = (end - start) // pointer_size
             if new_len < len(self.base.vmethods):
                 raise ValueError('VTable is smaller than base VTable')
         # Todo: More sanity checks: Don't overwrite any other vtable
@@ -149,21 +182,11 @@ class Class(object):
 
     def init_vtable(self):
         my_start_idx = self.vtable_start_idx()
-
-        # Fix: support 64bit work
-        if idc.__EA64__:
-            pointer_size = idaapi.DEF_ADDRSIZE
-            pfn_make_ptr = lambda x: ida_bytes.create_data(x, idc.FF_QWORD, 8, idaapi.BADADDR) #MakeQword
-            pfn_get_ptr_value = ida_bytes.get_qword
-        else:
-            pointer_size = idaapi.DEF_ADDRSIZE
-            pfn_make_ptr =  lambda x: ida_bytes.create_data(x, idc.FF_DWORD, 4, idaapi.BADADDR) #ida_bytes.MakeDword
-            pfn_get_ptr_value = ida_bytes.get_dword
+        pointer_size = self.pointer_size
 
         for idx, ea in enumerate(range(self.vtable_start, self.vtable_end, pointer_size)):
-            pfn_make_ptr(ea)
-            idc.op_plain_offset(ea, 0, 0)
-            dst = pfn_get_ptr_value(ea)
+            self.make_ptr(ea, pointer_size)
+            dst = self.get_ptr_value(ea, pointer_size)
 
             if idx < my_start_idx:
                 base_method = self.base.vmethods[idx]
@@ -182,15 +205,15 @@ class Class(object):
                     om.refresh()
                     self.vmethods.append(om)
             elif Method.s_is_pure_virtual_dst(dst):                 # New pure virtual
-                pvm = PureVirtualMethod(self, 'vf%X' % (idx*4), idx)
+                pvm = PureVirtualMethod(self, 'vf%X' % (idx*pointer_size), idx)
                 pvm.refresh()
                 self.vmethods.append(pvm)
             elif Method.s_is_deleted_virtual_dst(dst):              # New deleted virtual
-                pvm = DeletedVirtualMethod(self, 'vf%X' % (idx*4), idx)
+                pvm = DeletedVirtualMethod(self, 'vf%X' % (idx*pointer_size), idx)
                 pvm.refresh()
                 self.vmethods.append(pvm)
             else:                                                   # New virtual
-                vm = VirtualMethod(dst, self, 'vf%X' % (idx*4), idx)
+                vm = VirtualMethod(dst, self, 'vf%X' % (idx*pointer_size), idx)
                 vm.refresh()
                 self.vmethods.append(vm)
 
@@ -198,16 +221,13 @@ class Class(object):
     def get_vtable_index_ea(self, idx):
         if idx > len(self.vmethods):
             raise ValueError('get_vtable_index_ea for out of range index')
-        return self.vtable_start + (idx*4)
+        return self.vtable_start + (idx*self.pointer_size)
 
 
     def iter_vtable(self):
-        ea = self.vtable_start
-        end = self.vtable_end
-
-        while ea <= end:
-            yield (ea, idc.get_wide_dword(ea))
-            ea += 4
+        pointer_size = self.pointer_size
+        for ea in range(self.vtable_start, self.vtable_end, pointer_size):
+            yield (ea, self.get_ptr_value(ea, pointer_size))
 
 
     def set_struct_id(self, new_struct_id, delete_orphaned=False):
@@ -386,16 +406,16 @@ class Class(object):
 
         '''
         safe_name = name.replace('::', '_')
-    
+
         struct = idaapi.get_struc_id(safe_name)
         if struct != idaapi.BADADDR:
             if struct in database.get().classes_by_struct.keys():
                 idaapi.warning('The struct "%s" is already associated with a struct!' % safe_name)
                 return
-    
+
             if not util.ask_yes_no('The struct "%s" already exists. Continue?' % safe_name, True):
                 return
-    
+
         else:
             struct = idaapi.add_struc(idaapi.BADADDR, safe_name, 0)
             if struct == idaapi.BADADDR:
@@ -548,7 +568,7 @@ class VirtualMethod(Method):
 
     def refresh_comments(self):
         Method.refresh_comments(self)
-        idc.set_cmt(self.owner.get_vtable_index_ea(self.vtable_idx), self.get_vtable_comment(), 0) 
+        idc.set_cmt(self.owner.get_vtable_index_ea(self.vtable_idx), self.get_vtable_comment(), 0)
 
 
     def unlink(self):
