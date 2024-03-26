@@ -448,7 +448,7 @@ class ClassWidget(QtWidgets.QWidget):
         vm = self.edit_class.vmethods[row]
 
         if column == 0:         # Go to vtable offset
-            idc.jumpto(self.edit_class.vtable_start + row*4)
+            idc.jumpto(self.edit_class.get_vtable_index_ea(row))
         elif column == 1:       # Go to address
             idc.jumpto(vm.ea)
         elif column == 2:       # Edit signature
