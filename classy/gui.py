@@ -466,23 +466,25 @@ class ClassWidget(QtWidgets.QWidget):
         if self.edit_class is None:
             return
 
-        sel_ea = idc.get_screen_ea()
+        method_func = idaapi.choose_func("Choose function to use as a class method", idc.get_screen_ea())
 
-        if sel_ea == idc.BADADDR:
+        if method_func is None:
             return
 
+        method_ea = method_func.start_ea
+
         existing_method = None
-        if sel_ea in db.known_methods:
-            existing_method = db.known_methods[sel_ea]
-            if type(existing_method) != database_entries.Method:
+        if method_ea in db.known_methods:
+            existing_method = db.known_methods[method_ea]
+            if type(existing_method) is not database_entries.Method:
                 idaapi.warning("Cannot unlink function that is in a VTable")
                 return
 
-        name = idc.get_name(sel_ea, 0)
+        name = idc.get_name(method_ea, 0)
         if name.startswith('_Z'):       # Ignore already mangled names
             name = ''
         if not name:
-            name = 'sub_%X' % sel_ea
+            name = 'sub_%X' % method_ea
 
         dlg = SignatureDialog(name=name, owner_type=self.edit_class.name, fixed_owner_type=True)
         if dlg.exec_() != QtWidgets.QDialog.Accepted:
@@ -491,7 +493,7 @@ class ClassWidget(QtWidgets.QWidget):
         if existing_method is not None:
             existing_method.unlink()
 
-        method = database_entries.Method(sel_ea, self.edit_class, dlg.name)
+        method = database_entries.Method(method_ea, self.edit_class, dlg.name)
         method.set_signature(dlg.name, dlg.args, dlg.return_type, dlg.is_const, dlg.ctor_type, dlg.dtor_type)
         self.edit_class.methods.append(method)
         method.refresh()
